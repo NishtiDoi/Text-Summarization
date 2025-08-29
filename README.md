@@ -1,229 +1,208 @@
-# Text Summarization with PEGASUS
+# Text Summarization with Fine-tuned BART
 
-A text summarization project using the PEGASUS model fine-tuned on the SAMSum dataset for dialogue summarization.
+A dialogue summarization system that fine-tunes Facebook's BART-large-xsum model on the SAMSum dataset to generate concise summaries of conversational text.
 
 ## Overview
 
-This project implements an abstractive text summarization system using Google's PEGASUS (Pre-training with Extracted Gap-sentences for Abstractive SUmmarization Sequence-to-sequence) model. The model is fine-tuned on the SAMSum dataset, which contains conversational dialogues and their corresponding summaries.
+This project implements an end-to-end text summarization pipeline that:
+- Fine-tunes a pre-trained BART model on conversational data
+- Evaluates performance using ROUGE metrics
+- Provides an easy-to-use inference pipeline for generating summaries
 
-## Features
+## Dataset
 
-- Fine-tuning PEGASUS model on dialogue data
-- Batch processing for efficient training and evaluation
-- ROUGE metric evaluation for model performance assessment
-- Model and tokenizer persistence for future use
-- GPU acceleration support
+The project uses the **SAMSum dataset**, which contains:
+- Messenger-like conversations between friends
+- Human-written summaries of these conversations
+- Approximately 16,000 conversation-summary pairs
+
+## Model Architecture
+
+- **Base Model**: `facebook/bart-large-xsum`
+- **Task**: Sequence-to-sequence text summarization
+- **Framework**: Hugging Face Transformers
 
 ## Requirements
 
 ```bash
-pip install transformers[sentencepiece] datasets sacrebleu rouge_score py7zr
-pip install --upgrade accelerate
+pip install transformers[sentencepiece]
+pip install datasets
+pip install sacrebleu
+pip install rouge_score
+pip install py7zr
+pip install accelerate
+pip install evaluate
+pip install nltk
+pip install matplotlib
+pip install pandas
 pip install torch
-pip install matplotlib pandas nltk tqdm
+pip install tqdm
 ```
 
-## Dataset
+## Installation & Setup
 
-The project uses the SAMSum dataset, which contains:
-- **Training set**: Conversational dialogues with summaries
-- **Validation set**: Used for model evaluation during training
-- **Test set**: Used for final performance evaluation
+1. **Clone and install dependencies**:
+```bash
+# Install required packages (see Requirements section)
+```
 
-## Model Architecture
+2. **Download the dataset**:
+```bash
+wget https://github.com/entbappy/Branching-tutorial/raw/master/summarizer-data.zip
+unzip summarizer-data.zip
+```
 
-- **Base Model**: `google/pegasus-cnn_dailymail`
-- **Model Type**: Sequence-to-Sequence (Seq2Seq) for abstractive summarization
-- **Tokenizer**: PEGASUS tokenizer with support for dialogue formatting
-
-## Training Configuration
-
-| Parameter | Value |
-|-----------|-------|
-| Epochs | 1 |
-| Batch Size (Train) | 1 |
-| Batch Size (Eval) | 1 |
-| Gradient Accumulation Steps | 16 |
-| Max Input Length | 1024 tokens |
-| Max Output Length | 128 tokens |
-| Weight Decay | 0.01 |
-| Warmup Steps | 500 |
+3. **Check GPU availability**:
+```bash
+nvidia-smi  # Verify CUDA is available
+```
 
 ## Usage
 
-### 1. Setup and Installation
+### Training
 
+The training pipeline includes:
+
+1. **Data Preprocessing**:
+   - Loads SAMSum dataset from disk
+   - Cleans dialogue text (removes artifacts like `<file_gif>`)
+   - Tokenizes input dialogues and target summaries
+   - Adds instruction prompt: "Summarize the following conversation:"
+
+2. **Model Training**:
+   - 3 epochs of fine-tuning
+   - Batch size: 2 per device
+   - Learning rate: 2e-5
+   - Gradient accumulation: 8 steps
+   - Evaluation every 500 steps
+
+3. **Training Arguments**:
 ```python
-# Install required packages
-!pip install transformers[sentencepiece] datasets sacrebleu rouge_score py7zr -q
-!pip install --upgrade accelerate
-
-# Import necessary libraries
-from transformers import pipeline, AutoModelForSeq2SeqLM, AutoTokenizer
-import torch
-```
-
-### 2. Load Pre-trained Model
-
-```python
-model_ckpt = "google/pegasus-cnn_dailymail"
-tokenizer = AutoTokenizer.from_pretrained(model_ckpt)
-model_pegasus = AutoModelForSeq2SeqLM.from_pretrained(model_ckpt)
-```
-
-### 3. Data Preprocessing
-
-The `convert_examples_to_features()` function handles:
-- Tokenization of input dialogues (max 1024 tokens)
-- Tokenization of target summaries (max 128 tokens)
-- Attention mask generation
-
-### 4. Training
-
-```python
-from transformers import Trainer, TrainingArguments
-
-# Configure training arguments
-trainer_args = TrainingArguments(
+TrainingArguments(
     output_dir='pegasus-samsum',
-    num_train_epochs=1,
-    per_device_train_batch_size=1,
-    # ... other parameters
+    num_train_epochs=3,
+    warmup_steps=200,
+    per_device_train_batch_size=2,
+    per_device_eval_batch_size=2,
+    weight_decay=0.01,
+    learning_rate=2e-5,
+    eval_strategy='steps',
+    eval_steps=500
 )
-
-# Train the model
-trainer = Trainer(model=model_pegasus, args=trainer_args, ...)
-trainer.train()
 ```
 
-### 5. Evaluation
+### Evaluation
 
-The project uses ROUGE metrics for evaluation:
+The model is evaluated using ROUGE metrics:
 - **ROUGE-1**: Unigram overlap
 - **ROUGE-2**: Bigram overlap  
 - **ROUGE-L**: Longest common subsequence
 - **ROUGE-Lsum**: Summary-level ROUGE-L
 
-### 6. Inference
+### Inference
+
+Generate summaries for new conversations:
 
 ```python
+from transformers import pipeline, AutoTokenizer
+
 # Load trained model
-pipe = pipeline("summarization", 
-                model="pegasus-samsum-model",
-                tokenizer=tokenizer)
+tokenizer = AutoTokenizer.from_pretrained("./tokenizer")
+pipe = pipeline("summarization", model="pegasus-samsum-model", tokenizer=tokenizer)
+
+# Generation parameters
+gen_kwargs = {
+    "length_penalty": 0.8, 
+    "num_beams": 8, 
+    "max_length": 128
+}
 
 # Generate summary
-gen_kwargs = {"length_penalty": 0.8, "num_beams": 8, "max_length": 128}
-summary = pipe(dialogue_text, **gen_kwargs)[0]["summary_text"]
+conversation = "Your dialogue text here..."
+summary = pipe(conversation, **gen_kwargs)[0]["summary_text"]
+print(summary)
 ```
+
+## Key Features
+
+- **Batch Processing**: Efficient evaluation with configurable batch sizes
+- **GPU Support**: Automatic CUDA detection and utilization
+- **Robust Tokenization**: Handles variable-length inputs with truncation
+- **Comprehensive Metrics**: Multi-dimensional ROUGE evaluation
+- **Model Persistence**: Save and load trained models and tokenizers
 
 ## File Structure
 
 ```
 ├── text_summarization.py          # Main training script
-├── pegasus-samsum-model/           # Saved model directory
-├── tokenizer/                      # Saved tokenizer directory
-├── samsum_dataset/                 # Dataset directory
-└── README.md                       # This file
+├── pegasus-samsum-model/          # Saved fine-tuned model
+├── tokenizer/                     # Saved tokenizer
+├── samsum_dataset/                # SAMSum dataset files
+└── README.md                      # This file
 ```
 
-## Generation Parameters
+## Training Details
 
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `length_penalty` | 0.8 | Penalty for longer sequences |
-| `num_beams` | 8 | Number of beams for beam search |
-| `max_length` | 128 | Maximum summary length |
+### Data Processing
+- Input format: "Summarize the following conversation: {dialogue}"
+- Maximum input length: 1024 tokens
+- Maximum summary length: 128 tokens
+- Special tokens handled automatically
 
-## Hardware Requirements
-
-- **GPU**: CUDA-compatible GPU recommended for training
-- **RAM**: Minimum 8GB, 16GB+ recommended
-- **Storage**: ~5GB for model weights and dataset
+### Model Configuration
+- **Length Penalty**: 0.8 (slightly favors shorter summaries)
+- **Beam Search**: 8 beams for better quality
+- **Gradient Accumulation**: 8 steps (effective batch size: 16)
 
 ## Performance
 
-The model is evaluated using ROUGE metrics on the test set. Results are displayed in a pandas DataFrame showing:
-- ROUGE-1, ROUGE-2, ROUGE-L, and ROUGE-Lsum F1 scores
-- Performance comparison against baseline models
-
-## Key Functions
-
-### `convert_examples_to_features(example_batch)`
-Converts raw dialogue and summary text into tokenized features suitable for training.
-
-### `generate_batch_sized_chunks(list_of_elements, batch_size)`
-Utility function for processing data in batches to manage memory usage.
-
-### `calculate_metric_on_test_ds(...)`
-Evaluates model performance on test dataset using ROUGE metrics with batch processing.
-
-## Model Saving and Loading
-
-```python
-# Save model and tokenizer
-model_pegasus.save_pretrained("pegasus-samsum-model")
-tokenizer.save_pretrained("tokenizer")
-
-# Load saved components
-tokenizer = AutoTokenizer.from_pretrained("/content/tokenizer")
-model = AutoModelForSeq2SeqLM.from_pretrained("pegasus-samsum-model")
-```
+The model is evaluated on the test set using ROUGE metrics. Results are displayed in a pandas DataFrame showing:
+- ROUGE-1, ROUGE-2, ROUGE-L, and ROUGE-Lsum F1-scores
+- Comparison with baseline metrics
 
 ## Example Output
 
+**Input Dialogue**:
 ```
-Dialogue:
-[Sample conversation between multiple speakers]
-
-Reference Summary:
-[Human-written summary of the conversation]
-
-Model Summary:
-[AI-generated summary from the trained model]
+Amanda: I baked cookies. Do you want some?
+Jerry: Sure! What kind of cookies?
+Amanda: Chocolate chip and oatmeal. 
+Jerry: I'll take some chocolate chip. Thanks!
 ```
 
-## Future Improvements
+**Generated Summary**:
+```
+Amanda baked cookies and offered some to Jerry. Jerry requested chocolate chip cookies.
+```
 
-- Experiment with different learning rates and batch sizes
-- Try other pre-trained models (T5, BART)
-- Implement early stopping based on validation loss
-- Add more sophisticated evaluation metrics
-- Fine-tune on domain-specific datasets
+## Hardware Requirements
 
-## License
-
-This project uses models and datasets that may have their own licensing terms. Please check:
-- [Hugging Face Transformers License](https://github.com/huggingface/transformers/blob/main/LICENSE)
-- [SAMSum Dataset License](https://huggingface.co/datasets/samsum)
-- [PEGASUS Model License](https://huggingface.co/google/pegasus-cnn_dailymail)
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+- **GPU**: CUDA-compatible GPU recommended (training tested on GPU)
+- **Memory**: Minimum 8GB RAM, 16GB+ recommended
+- **Storage**: ~5GB for model files and dataset
 
 ## Troubleshooting
 
-### Common Issues
+1. **CUDA Out of Memory**: Reduce batch size or use gradient checkpointing
+2. **Slow Training**: Ensure GPU is being utilized (`device = "cuda"`)
+3. **Import Errors**: Verify all dependencies are installed with correct versions
 
-1. **CUDA out of memory**: Reduce batch size or use gradient accumulation
-2. **Slow training**: Ensure GPU is being used and consider mixed precision training
-3. **Poor summaries**: Try adjusting generation parameters or training for more epochs
+## Contributing
 
-### Dependencies Issues
+Feel free to submit issues and enhancement requests. Areas for improvement:
+- Experiment with different base models
+- Add support for other summarization datasets
+- Implement additional evaluation metrics
+- Add inference optimizations
 
-If you encounter package conflicts, try:
-```bash
-pip uninstall -y transformers accelerate
-pip install transformers accelerate
-```
+## License
 
-## References
+This project uses models and datasets with their respective licenses:
+- BART model: Apache 2.0
+- SAMSum dataset: CC BY-NC-SA 4.0
 
-- [PEGASUS: Pre-training with Extracted Gap-sentences for Abstractive Summarization](https://arxiv.org/abs/1912.08777)
-- [SAMSum Corpus: A Human-annotated Dialogue Dataset for Abstractive Summarization](https://arxiv.org/abs/1911.12237)
-- [Hugging Face Transformers Documentation](https://huggingface.co/docs/transformers/)
+## Acknowledgments
+
+- Hugging Face Transformers library
+- SAMSum dataset creators
+- Facebook AI Research (BART model)
